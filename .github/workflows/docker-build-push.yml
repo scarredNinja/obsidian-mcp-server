@@ -16,6 +16,10 @@ env:
   REGISTRY: ghcr.io
   DOCKER_IMAGE_NAME: ghcr.io/scarredninja/obsidian-mcp-server
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
