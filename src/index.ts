@@ -95,11 +95,12 @@ async function runHTTP(): Promise<void> {
     process.stderr.write(`Health: http://localhost:${PORT}/health\n`);
     process.stderr.write(`MCP endpoint: http://localhost:${PORT}/mcp\n`);
     const writeFolders = process.env['VAULT_WRITE_FOLDERS'];
-    process.stderr.write(
-      writeFolders
-        ? `Write access enabled for: ${writeFolders}\n`
-        : 'Write access: disabled (VAULT_WRITE_FOLDERS not set)\n',
-    );
+    const writeMsg = !writeFolders
+      ? 'Write access: disabled (VAULT_WRITE_FOLDERS not set)'
+      : writeFolders.trim() === '*'
+        ? 'Write access: all folders (*)'
+        : `Write access enabled for: ${writeFolders}`;
+    process.stderr.write(writeMsg + '\n');
   });
 }
 

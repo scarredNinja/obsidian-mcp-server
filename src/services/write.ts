@@ -61,15 +61,20 @@ function resolveWritePath(relativePath: string): {
     throw new Error(`Write path must end with .md — got: "${relativePath}"`);
   }
 
-  // 4. Must be inside an allowed write folder
-  const inAllowed = writeFolders.some(
-    (folder) => normalised === folder || normalised.startsWith(folder + '/'),
-  );
-  if (!inAllowed) {
-    throw new Error(
-      `Write access denied: "${normalised}" is not inside any configured write folder. ` +
-      `Allowed: ${writeFolders.map((f) => `"${f}"`).join(', ')}`,
+  // 4. Must be inside an allowed write folder.
+  // '*' is a special value meaning "allow writes anywhere in the vault" —
+  // useful when the vault is a flat structure with no subfolders.
+  const allowAll = writeFolders.includes('*');
+  if (!allowAll) {
+    const inAllowed = writeFolders.some(
+      (folder) => normalised === folder || normalised.startsWith(folder + '/'),
     );
+    if (!inAllowed) {
+      throw new Error(
+        `Write access denied: "${normalised}" is not inside any configured write folder. ` +
+        `Allowed: ${writeFolders.map((f) => `"${f}"`).join(', ')}`,
+      );
+    }
   }
 
   // 5. Traversal check
