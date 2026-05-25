@@ -438,17 +438,29 @@ export function extractWikiLinks(body: string): WikiLink[] {
 export async function findBacklinks(noteName: string): Promise<NoteMetadata[]> {
   const target = path.basename(noteName, '.md').toLowerCase();
   const all = await listAllNotes();
-  const results: NoteMetadata[] = [];
 
-  for (const meta of all) {
-    const note = await readNote(meta.path);
-    const links = extractWikiLinks(note.body);
-    if (links.some((l) => l.target.toLowerCase() === target)) {
-      results.push(meta);
-    }
-  }
+  const results = await Promise.all(
+    all.map(async (meta): Promise<NoteMetadata | null> => {
+      try {
+        const note = await readNote(meta.path);
+        
+        // Fast-path: if the target note name is not even a substring in the body, skip parsing
+        if (!note.body.toLowerCase().includes(target)) {
+          return null;
+        }
 
-  return results;
+        const links = extractWikiLinks(note.body);
+        if (links.some((l) => l.target.toLowerCase() === target)) {
+          return meta;
+        }
+      } catch {
+        // Safe fallback for unreadable/locked notes
+      }
+      return null;
+    })
+  );
+
+  return results.filter((meta): meta is NoteMetadata => meta !== null);
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────

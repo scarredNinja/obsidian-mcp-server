@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import express from 'express';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { createServer } from './server.js';
 
 const TRANSPORT = process.env['TRANSPORT'] ?? 'stdio';
@@ -74,19 +75,16 @@ async function runHTTP(): Promise<void> {
     });
   });
 
-  // Stateless MCP endpoint — new transport per request. Secure with API key verification.
+  // Global stateful Streamable HTTP server transport
+  const server = createServer();
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    enableJsonResponse: true,
+  });
+  await server.connect(transport);
+
+  // Stateful MCP endpoint — delegates all GET/POST requests to the global transport.
   app.post('/mcp', verifyApiKey, async (req, res) => {
-    const server = createServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined, // stateless mode
-      enableJsonResponse: true,
-    });
-
-    res.on('close', () => {
-      void transport.close();
-    });
-
-    await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   });
 
