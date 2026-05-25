@@ -7,13 +7,14 @@ import { registerSearchTools } from './tools/search.js';
 import { registerReadTools } from './tools/read.js';
 import { registerListTools } from './tools/list.js';
 import { registerTaskTools } from './tools/tasks.js';
+import { registerWriteTools } from './tools/write.js';
 
 export function createServer(): McpServer {
   const vaultName = process.env['VAULT_NAME'] ?? 'Obsidian Vault';
 
   const server = new McpServer({
     name: 'obsidian-mcp-server',
-    version: '1.0.0',
+    version: '1.1.0',
   });
 
   // Register all tool groups
@@ -21,6 +22,7 @@ export function createServer(): McpServer {
   registerReadTools(server);
   registerListTools(server);
   registerTaskTools(server);
+  registerWriteTools(server);
 
   return server;
 }

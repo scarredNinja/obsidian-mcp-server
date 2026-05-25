@@ -70,6 +70,7 @@ async function runHTTP(): Promise<void> {
       transport: 'http',
       vault: process.env['VAULT_PATH'] ?? '(not set)',
       allowed_folders: process.env['VAULT_ALLOWED_FOLDERS'] ? 'configured' : 'unrestricted',
+      write_folders: process.env['VAULT_WRITE_FOLDERS'] ?? 'disabled',
     });
   });
 
@@ -93,6 +94,12 @@ async function runHTTP(): Promise<void> {
     process.stderr.write(`obsidian-mcp-server running (http) on port ${PORT}\n`);
     process.stderr.write(`Health: http://localhost:${PORT}/health\n`);
     process.stderr.write(`MCP endpoint: http://localhost:${PORT}/mcp\n`);
+    const writeFolders = process.env['VAULT_WRITE_FOLDERS'];
+    process.stderr.write(
+      writeFolders
+        ? `Write access enabled for: ${writeFolders}\n`
+        : 'Write access: disabled (VAULT_WRITE_FOLDERS not set)\n',
+    );
   });
 }
 
