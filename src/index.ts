@@ -7,7 +7,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import express from 'express';
 import fs from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHmac } from 'node:crypto';
+import path from 'node:path';
 import { createServer } from './server.js';
 
 const TRANSPORT = process.env['TRANSPORT'] ?? 'stdio';
@@ -23,7 +24,13 @@ async function runStdio(): Promise<void> {
 
 async function runHTTP(): Promise<void> {
   const app = express();
-  app.use(express.json());
+  
+  // Parse JSON bodies and capture raw body for secure GitHub webhook signature checks
+  app.use(express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    }
+  }));
 
   // 1. Structured JSON request logging to stdout (scraped by Promtail/Loki)
   app.use((req, res, next) => {
@@ -88,6 +95,66 @@ async function runHTTP(): Promise<void> {
     await transport.handleRequest(req, res, req.body);
   });
 
+  // Webhook endpoint for Git push events
+  app.post('/webhook', (req: express.Request & { rawBody?: Buffer }, res: express.Response) => {
+    // 1. Verify GitHub Webhook Secret if configured
+    const webhookSecret = process.env['GITHUB_WEBHOOK_SECRET'];
+    if (webhookSecret) {
+      const signature = req.get('x-hub-signature-256');
+      if (!signature) {
+        res.status(401).json({ error: 'Missing x-hub-signature-256 header' });
+        return;
+      }
+      
+      if (!req.rawBody) {
+        res.status(400).json({ error: 'Missing raw body for signature verification' });
+        return;
+      }
+      
+      const hmac = createHmac('sha256', webhookSecret);
+      const digest = 'sha256=' + hmac.update(req.rawBody).digest('hex');
+      
+      if (signature !== digest) {
+        res.status(401).json({ error: 'Invalid webhook signature' });
+        return;
+      }
+    }
+
+    // 2. Write trigger file to vault
+    const vaultPath = process.env['VAULT_PATH'];
+    if (!vaultPath) {
+      res.status(500).json({ error: 'VAULT_PATH not configured' });
+      return;
+    }
+
+    const triggerFile = path.join(vaultPath, '.sync-trigger.json');
+
+    try {
+      const triggerData = {
+        event: 'push',
+        timestamp: new Date().toISOString(),
+        repository: req.body?.repository?.full_name ?? 'unknown',
+        ref: req.body?.ref ?? 'unknown',
+        after: req.body?.after ?? 'unknown'
+      };
+      
+      fs.writeFileSync(triggerFile, JSON.stringify(triggerData, null, 2), 'utf8');
+      
+      const log = {
+        timestamp: new Date().toISOString(),
+        message: 'Webhook trigger file written successfully',
+        repository: triggerData.repository,
+        ref: triggerData.ref
+      };
+      process.stdout.write(JSON.stringify(log) + '\n');
+      
+      res.status(200).json({ status: 'triggered' });
+    } catch (err) {
+      process.stderr.write(`Error writing trigger file: ${String(err)}\n`);
+      res.status(500).json({ error: `Failed to write trigger file: ${String(err)}` });
+    }
+  });
+
   app.listen(PORT, () => {
     process.stderr.write(`obsidian-mcp-server running (http) on port ${PORT}\n`);
     process.stderr.write(`Health: http://localhost:${PORT}/health\n`);
@@ -105,12 +172,21 @@ async function runHTTP(): Promise<void> {
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 
 function loadSecrets(): void {
-  const secretPath = '/run/secrets/mcp_api_key';
-  if (fs.existsSync(secretPath)) {
+  const mcpSecretPath = '/run/secrets/mcp_api_key';
+  if (fs.existsSync(mcpSecretPath)) {
     try {
-      process.env['MCP_API_KEY'] = fs.readFileSync(secretPath, 'utf8').trim();
+      process.env['MCP_API_KEY'] = fs.readFileSync(mcpSecretPath, 'utf8').trim();
     } catch (err) {
-      process.stderr.write(`Warning: Failed to read secret from ${secretPath}: ${String(err)}\n`);
+      process.stderr.write(`Warning: Failed to read secret from ${mcpSecretPath}: ${String(err)}\n`);
+    }
+  }
+
+  const webhookSecretPath = '/run/secrets/github_webhook_secret';
+  if (fs.existsSync(webhookSecretPath)) {
+    try {
+      process.env['GITHUB_WEBHOOK_SECRET'] = fs.readFileSync(webhookSecretPath, 'utf8').trim();
+    } catch (err) {
+      process.stderr.write(`Warning: Failed to read secret from ${webhookSecretPath}: ${String(err)}\n`);
     }
   }
 }
