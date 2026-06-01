@@ -12,6 +12,8 @@ const API_KEY = process.env['OBSIDIAN_MCP_API_KEY'] || 'e821a784396fe3f04bbcd498
 
 const LOG_FILE = path.join('C:', 'Users', 'DJ', 'source', 'repos', 'obsidian-mcp-server', 'bridge.log');
 
+let sessionId: string | null = null;
+
 function logDebug(msg: string): void {
   try {
     fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${msg}\n`, 'utf8');
@@ -67,13 +69,22 @@ rl.on('line', async (line) => {
       'x-api-key': API_KEY,
     };
 
-    logDebug(`Sending to ${URL}: ${trimmed}`);
+    if (sessionId) {
+      headers['mcp-session-id'] = sessionId;
+    }
+
+    logDebug(`Sending to ${URL} (Session: ${sessionId ?? 'None'}): ${trimmed}`);
 
     const res = await fetch(URL, {
       method: 'POST',
       headers,
       body: trimmed,
     });
+
+    const mcpSessionId = res.headers.get('mcp-session-id');
+    if (mcpSessionId) {
+      sessionId = mcpSessionId;
+    }
 
     if (!res.ok) {
       const errText = await res.text();

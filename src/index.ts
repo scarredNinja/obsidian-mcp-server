@@ -82,17 +82,84 @@ async function runHTTP(): Promise<void> {
     });
   });
 
-  // Global stateful Streamable HTTP server transport
-  const server = createServer();
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-    enableJsonResponse: true,
-  });
-  await server.connect(transport);
+  // Session map to hold active client sessions
+  interface SessionInfo {
+    transport: StreamableHTTPServerTransport;
+    server: any;
+    lastAccess: number;
+  }
+  const sessions = new Map<string, SessionInfo>();
 
-  // Stateful MCP endpoint — delegates all GET/POST requests to the global transport.
+  // Periodically clean up inactive sessions to prevent memory leaks (e.g. idle for > 2 hours)
+  setInterval(() => {
+    const now = Date.now();
+    const expiryTime = 2 * 60 * 60 * 1000; // 2 hours
+    for (const [sid, session] of sessions.entries()) {
+      if (now - session.lastAccess > expiryTime) {
+        process.stderr.write(`Cleaning up expired session ${sid}\n`);
+        session.transport.close().catch(() => {});
+        sessions.delete(sid);
+      }
+    }
+  }, 15 * 60 * 1000); // Run every 15 minutes
+
+  // Stateful MCP endpoint
   app.post('/mcp', verifyApiKey, async (req, res) => {
-    await transport.handleRequest(req, res, req.body);
+    const sessionIdHeader = req.get('mcp-session-id');
+
+    if (sessionIdHeader) {
+      const session = sessions.get(sessionIdHeader);
+      if (!session) {
+        res.status(404).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32001,
+            message: 'Session not found',
+          },
+          id: null,
+        });
+        return;
+      }
+      session.lastAccess = Date.now();
+      await session.transport.handleRequest(req, res, req.body);
+      return;
+    }
+
+    // No session ID provided. Check if this is an initialize request
+    const messages = Array.isArray(req.body) ? req.body : [req.body];
+    const isInit = messages.some((msg: any) => msg?.method === 'initialize');
+
+    if (!isInit) {
+      res.status(400).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: 'Bad Request: Mcp-Session-Id header is required',
+        },
+        id: null,
+      });
+      return;
+    }
+
+    // Create a brand new session for the new client
+    const newSessionId = randomUUID();
+    process.stderr.write(`Creating new session: ${newSessionId}\n`);
+
+    const sessionServer = createServer();
+    const sessionTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => newSessionId,
+      enableJsonResponse: true,
+    });
+
+    await sessionServer.connect(sessionTransport);
+
+    sessions.set(newSessionId, {
+      transport: sessionTransport,
+      server: sessionServer,
+      lastAccess: Date.now(),
+    });
+
+    await sessionTransport.handleRequest(req, res, req.body);
   });
 
   // Webhook endpoint for Git push events
