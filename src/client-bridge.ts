@@ -90,6 +90,11 @@ rl.on('line', async (line) => {
       const errText = await res.text();
       logDebug(`HTTP Error ${res.status}: ${errText}`);
       
+      if (res.status === 404 || errText.includes('Session not found')) {
+        logDebug('Clearing invalid session ID due to Session not found error');
+        sessionId = null;
+      }
+      
       // Never write responses to stdout for notifications
       if (!isNotification) {
         const errResponse = {
