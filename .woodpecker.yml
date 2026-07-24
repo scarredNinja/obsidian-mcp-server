@@ -1,0 +1,34 @@
+steps:
+  lint-and-test:
+    image: node:20-alpine
+    commands:
+      - npm ci
+      - npm run build
+    when:
+      event: [ push, pull_request, manual ]
+  docker-build-push:
+    image: plugins/docker
+    privileged: true
+    settings:
+      registry: ghcr.io
+      repo: ghcr.io/scarredninja/obsidian-mcp-server
+      tags:
+        - latest
+        - ${CI_COMMIT_SHA:0:7}
+      username:
+        from_secret: ghcr_username
+      password:
+        from_secret: ghcr_password
+    when:
+      branch: [ main, "feature/*", "release/*" ]
+      event: [ push, manual ]
+  swarm-auto-deploy:
+    image: curlimages/curl:latest
+    environment:
+      PORTAINER_WEBHOOK_URL:
+        from_secret: portainer_webhook_url
+    commands:
+      - curl -X POST "$PORTAINER_WEBHOOK_URL"
+    when:
+      branch: [ main, "release/*" ]
+      event: [ push, tag, manual ]
